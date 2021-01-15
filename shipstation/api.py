@@ -27,12 +27,12 @@ class ShipStationBase(object):
 
 class ShipStationCustomsItem(ShipStationBase):
     def __init__(
-        self,
-        description=None,
-        quantity=1,
-        value=Decimal("0"),
-        harmonized_tariff_code=None,
-        country_of_origin=None,
+            self,
+            description=None,
+            quantity=1,
+            value=Decimal("0"),
+            harmonized_tariff_code=None,
+            country_of_origin=None,
     ):
         self.description = description
         self.quantity = quantity
@@ -105,6 +105,13 @@ class ShipStationWeight(ShipStationBase):
         self.value = value
 
 
+class ShipStationAdvancedOptions(ShipStationBase):
+    def __init__(self, custom_field1=None, source=None, store_id=None):
+        self.custom_field1 = custom_field1
+        self.source = source
+        self.store_id = store_id
+
+
 class ShipStationContainer(ShipStationBase):
     def __init__(self, units=None, length=None, width=None, height=None):
         self.units = units
@@ -130,17 +137,18 @@ class ShipStationContainer(ShipStationBase):
 
 class ShipStationItem(ShipStationBase):
     def __init__(
-        self,
-        key=None,
-        sku=None,
-        name=None,
-        image_url=None,
-        quantity=None,
-        unit_price=None,
-        warehouse_location=None,
-        options=None,
+            self,
+            line_item_key=None,
+            sku=None,
+            name=None,
+            image_url=None,
+            quantity=None,
+            unit_price=None,
+            warehouse_location=None,
+            options=None,
+            upc=None
     ):
-        self.key = key
+        self.line_item_key = line_item_key
         self.sku = sku
         self.name = name
         self.image_url = image_url
@@ -149,6 +157,7 @@ class ShipStationItem(ShipStationBase):
         self.unit_price = unit_price
         self.warehouse_location = warehouse_location
         self.options = options
+        self.upc = upc
 
     def set_weight(self, weight):
         if type(weight) is not ShipStationWeight:
@@ -167,18 +176,18 @@ class ShipStationItem(ShipStationBase):
 
 class ShipStationAddress(ShipStationBase):
     def __init__(
-        self,
-        name=None,
-        company=None,
-        street1=None,
-        street2=None,
-        street3=None,
-        city=None,
-        state=None,
-        postal_code=None,
-        country=None,
-        phone=None,
-        residential=None,
+            self,
+            name=None,
+            company=None,
+            street1=None,
+            street2=None,
+            street3=None,
+            city=None,
+            state=None,
+            postal_code=None,
+            country=None,
+            phone=None,
+            residential=None,
     ):
         self.name = name
         self.company = company
@@ -312,6 +321,18 @@ class ShipStationOrder(ShipStationBase):
 
         return dict(units="ounces", value=round(weight, 2))
 
+    def set_advanced_options(self, advanced_options):
+        if type(advanced_options) is not ShipStationAdvancedOptions:
+            raise AttributeError("Should be type ShipStationAdvancedOptions")
+
+        self.advanced_options = advanced_options
+
+    def get_advanced_options(self):
+        if self.advanced_options:
+            return self.advanced_options.as_dict()
+        else:
+            return None
+
     def add_item(self, item):
         """
         Adds a new item to the order with all of the required keys.
@@ -346,6 +367,7 @@ class ShipStationOrder(ShipStationBase):
         d["shipTo"] = self.get_shipping_address_as_dict()
         d["weight"] = self.get_weight()
         d["internationalOptions"] = self.get_international_options_as_dict()
+        d["advancedOptions"] = self.get_advanced_options()
 
         return d
 
@@ -403,15 +425,25 @@ class ShipStation(ShipStationBase):
         return self.orders
 
     def submit_orders(self):
+        response = []
         for order in self.orders:
-            self.post(endpoint="/orders/createorder",
+            r = self.create_order(order)
+            response.append(r)
+        return response
+
+    def create_order(self, order):
+        response = self.post(endpoint="/orders/createorder",
                       data=json.dumps(order.as_dict()))
+
+        return response
 
     def get(self, endpoint="", payload=None):
         url = "{}{}".format(self.url, endpoint)
         r = requests.get(url, auth=(self.key, self.secret), params=payload)
         if self.debug:
             pprint.PrettyPrinter(indent=4).pprint(r.json())
+
+        return r
 
     def post(self, endpoint="", data=None):
         url = "{}{}".format(self.url, endpoint)
@@ -421,9 +453,21 @@ class ShipStation(ShipStationBase):
         if self.debug:
             pprint.PrettyPrinter(indent=4).pprint(r.json())
 
+        return r
+
+    def delete(self, endpoint=""):
+        url = "{}{}".format(self.url, endpoint)
+        headers = {"content-type": "application/json"}
+        r = requests.delete(url, auth=(self.key, self.secret),
+                          headers=headers)
+        if self.debug:
+            pprint.PrettyPrinter(indent=4).pprint(r.json())
+
+        return r
+
     def fetch_orders(self, parameters={}):
         """
-            Query and fetch existing orders from ShipStation
+            Query, fetch, and return existing orders from ShipStation
 
             Args:
                 parameters (dict): Dict of filters to filter by.
@@ -431,6 +475,9 @@ class ShipStation(ShipStationBase):
             Raises:
                 AttributeError: parameters not of type dict
                 AttributeError: invalid key in parameters dict.
+
+            Returns:
+                A <Response [code]> object.
 
             Examples:
                 >>> ss.fetch_orders(parameters={'order_status': 'shipped', 'page': '2'})
@@ -452,4 +499,42 @@ class ShipStation(ShipStationBase):
             self.to_camel_case(key): value for key, value in parameters.items()
         }
 
-        self.get(endpoint="/orders/list", payload=valid_parameters)
+        return self.get(
+            endpoint='/orders/list',
+            payload=valid_parameters
+        )
+
+    def fetch_order(self, order_id):
+        return self.get(
+            endpoint='/orders/' + order_id
+        )
+
+    def fetch_shipments(self):
+        return self.get(
+            endpoint='/shipments'
+        )
+
+    def delete_order(self, order_id):
+        return self.delete(
+            endpoint='/orders/' + order_id
+        )
+
+    def fetch_fulfillments(self):
+        return self.get(
+            endpoint='/fulfillments'
+        )
+
+    def fetch_products(self):
+        return self.get(
+            endpoint='/products'
+        )
+
+    def fetch_warehouses(self):
+        return self.get(
+            endpoint='/warehouses'
+        )
+
+    def fetch_stores(self):
+        return self.get(
+            endpoint='/stores'
+        )
